@@ -1345,3 +1345,23 @@ func TestModelHelpNotTriggeredWhileTyping(t *testing.T) {
 		t.Fatal("'?' must not open help while typing a query")
 	}
 }
+
+func TestPiWorkingUsesSharedSpinnerAndStopsWhenAwaitingInput(t *testing.T) {
+	t.Parallel()
+	session := workingSession("pi-project")
+	session.Windows[0].Panes = []snapshot.Pane{{CurrentCmd: "node", RestoreCmd: "pi"}}
+	model := newTestModel(t, &recordingActions{}, session)
+	if !model.hasWorkingWindow() {
+		t.Fatal("Pi working state did not enable animation")
+	}
+	before := model.View().Content
+	model = spinnerTickModel(model)
+	if after := model.View().Content; before == after {
+		t.Fatal("Pi working indicator did not animate")
+	}
+	session.Statuses[1] = StatusAwaitingInput
+	idle := newTestModel(t, &recordingActions{}, session)
+	if idle.hasWorkingWindow() {
+		t.Fatal("Pi waiting for input still animated")
+	}
+}

@@ -26,14 +26,16 @@ type Window struct {
 }
 
 type Pane struct {
-	Index       int            `json:"index"`
-	CurrentPath string         `json:"current_path"`
-	CurrentCmd  string         `json:"current_cmd"`
-	RestoreCmd  string         `json:"restore_cmd,omitempty"`
-	Scrollback  *ScrollbackRef `json:"scrollback,omitempty"`
-	IsActive    bool           `json:"is_active"`
-	ProcessPID  int            `json:"-"`
-	ProcessArgv []string       `json:"-"`
+	Index        int            `json:"index"`
+	CurrentPath  string         `json:"current_path"`
+	CurrentCmd   string         `json:"current_cmd"`
+	RestoreCmd   string         `json:"restore_cmd,omitempty"`
+	Scrollback   *ScrollbackRef `json:"scrollback,omitempty"`
+	IsActive     bool           `json:"is_active"`
+	ProcessPID   int            `json:"-"`
+	ProcessArgv  []string       `json:"-"`
+	LiveStatus   string         `json:"-"`
+	LiveStatusID string         `json:"-"`
 
 	Meta  map[string]string `json:"meta,omitempty"`
 	Agent *AgentSession     `json:"agent,omitempty"`

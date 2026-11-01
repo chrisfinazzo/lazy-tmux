@@ -141,3 +141,28 @@ configuration takes precedence. Update the executable used by your autosave daem
 as well as the CLI and restart the daemon after upgrading: an already running
 daemon continues using its old code. Existing snapshots without Pi identity are
 not guessed or automatically repaired.
+
+#### Pi activity in the picker
+
+Pi uses the same working spinner and status colors as Antex and Claude, including
+working-session detection in the quick picker:
+
+- `working`: agent execution or context compaction; the indicator animates.
+- `awaiting_input`: the turn completed or was aborted, or an input/editor prompt is open.
+- `awaiting_decision`: a confirmation/selection prompt is open.
+- `idle`: the client has started or switched sessions and is not running a turn.
+- `error`: the model run or compaction failed.
+
+The embedded extension publishes lifecycle events, not terminal text. Each picker
+refresh reads current ownership-verified tmux bindings once, matching the exact
+session ID and history file. It does not wait for autosave, replay an old snapshot
+status, or infer activity from the selected model. Exited clients, reused PIDs,
+changed conversations, pending restores, and ambiguous duplicate clients do not
+produce a borrowed or stuck spinner. Prompt states require Pi versions exposing
+UI-prompt lifecycle events; older clients do not guess these states.
+
+After upgrading the binary, already running Pi clients must load the updated
+extension with `/reload` when idle (new clients load it automatically). The older
+identity-only extension remains compatible with restoration but reports no live
+activity; a verified conversation without activity data is not shown as needing
+identity setup.

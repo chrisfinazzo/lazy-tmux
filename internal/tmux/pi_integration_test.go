@@ -261,6 +261,9 @@ func waitForPiSnapshot(
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	if data, err := os.ReadFile(file); err == nil {
+		t.Logf("session file header: %.1000s", data)
+	}
 	captured, _ := client.CaptureSession(name)
 	panes := testutil.Tmux(
 		t, "list-panes", "-a", "-F", "#{pane_current_command}|#{pane_current_path}|#{pane_pid}",

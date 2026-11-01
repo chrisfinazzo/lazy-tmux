@@ -2,9 +2,12 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestPiInstallUpgradeUninstall(t *testing.T) {
@@ -94,5 +97,23 @@ func TestPiSupportsSymlinkExtensionDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, piExtensionName)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPiExtensionLifecycleStatus(t *testing.T) {
+	t.Parallel()
+	if os.Getenv("ENABLE_REAL_PI_TESTS") != "true" {
+		t.Skip("requires the real-Pi integration environment")
+	}
+	packageDir := os.Getenv("PI_TEST_PACKAGE_DIR")
+	if packageDir == "" {
+		packageDir = "/usr/local/lib/node_modules/@mariozechner/pi-coding-agent"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "node", "testdata/pi-status.cjs", packageDir).
+		CombinedOutput()
+	if err != nil {
+		t.Fatalf("Pi lifecycle harness: %v\n%s", err, output)
 	}
 }

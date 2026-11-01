@@ -1,10 +1,13 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/alchemmist/lazy-tmux/internal/integration"
 	"github.com/alchemmist/lazy-tmux/internal/integration/claude"
+	"github.com/alchemmist/lazy-tmux/internal/integration/pi"
 	"github.com/alchemmist/lazy-tmux/internal/picker"
 	"github.com/alchemmist/lazy-tmux/internal/snapshot"
 )
@@ -59,5 +62,61 @@ func TestQuickPickerIncludesClaudeActivity(t *testing.T) {
 	}
 	if app.sessionHasWorkingAgent(registry, "work", false) {
 		t.Fatal("offline snapshot counted as working")
+	}
+}
+
+func TestPiPickerStatusRefreshWithoutAutosave(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	file := filepath.Join(home, "history.jsonl")
+	if err := os.WriteFile(
+		file,
+		[]byte(`{"type":"session","id":"pi-session","cwd":"`+home+`"}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	pane := snapshot.Pane{
+		CurrentCmd:  "node",
+		RestoreCmd:  "pi",
+		CurrentPath: home,
+		Meta:        map[string]string{"pi.session_file": file, "pi.session_id": "pi-session"},
+	}
+	live := snapshot.Pane{
+		CurrentPath:  home,
+		LiveStatusID: "pi-session",
+		LiveStatus:   "working",
+		Meta:         map[string]string{"pi.session_file": file},
+	}
+	registry := integration.NewRegistry(
+		pi.New(home, home).
+			WithStatusLoader(func() ([]snapshot.Pane, error) { return []snapshot.Pane{live}, nil }),
+	)
+	app, _ := newTestApp(t)
+	windows := []snapshot.Window{{Index: 1, Panes: []snapshot.Pane{pane}}}
+	if err := app.store.SaveSession(
+		snapshot.SessionSnapshot{SessionName: "pi", Windows: windows},
+	); err != nil {
+		t.Fatal(err)
+	}
+	for state, want := range map[string]picker.WindowStatus{
+		"working": picker.StatusWorking, "awaiting_input": picker.StatusAwaitingInput,
+		"awaiting_decision": picker.StatusAwaitingDecision, "idle": picker.StatusIdle, "error": picker.StatusError,
+	} {
+		live.LiveStatus = state
+		scope := registry.Scope()
+		if got := windowStatuses(scope, windows)[1]; got != want {
+			t.Fatalf("%s: got %v, want %v", state, got, want)
+		}
+		if got := app.sessionHasWorkingAgent(scope, "pi", true); got != (state == "working") {
+			t.Fatalf("quick picker state %s = %v", state, got)
+		}
+		if app.sessionHasWorkingAgent(scope, "pi", false) {
+			t.Fatal("offline Pi animated")
+		}
+	}
+	live.LiveStatus = ""
+	if got := windowStatuses(registry.Scope(), windows)[1]; got != picker.StatusNone {
+		t.Fatalf("verified legacy Pi incorrectly needs setup: %v", got)
 	}
 }

@@ -32,8 +32,10 @@ var (
 )
 
 type Integration struct {
-	home       string
-	sessionDir string
+	home        string
+	sessionDir  string
+	loadStatus  StatusLoader
+	statusCache *statusSnapshot
 }
 type sessionHeader struct {
 	Type string `json:"type"`
@@ -52,10 +54,17 @@ func New(home, sessionDir string) *Integration {
 		sessionDir = filepath.Join(home, "sessions")
 	}
 
-	return &Integration{home: home, sessionDir: sessionDir}
+	return &Integration{home: home, sessionDir: sessionDir, loadStatus: nil, statusCache: nil}
 }
-func (i *Integration) Name() string                   { return snapshot.AgentPi }
-func (i *Integration) Scope() integration.Integration { return i }
+func (i *Integration) Name() string { return snapshot.AgentPi }
+func (i *Integration) Scope() integration.Integration {
+	scoped := New(i.home, i.sessionDir)
+	scoped.loadStatus = i.loadStatus
+	scoped.statusCache = &statusSnapshot{}
+
+	return scoped
+}
+
 func (i *Integration) Matches(p snapshot.Pane) bool {
 	return agent.PaneKind(p) == snapshot.AgentPi ||
 		agent.LaunchKind(p.ProcessArgv) == snapshot.AgentPi
@@ -109,14 +118,6 @@ func (i *Integration) RestoreDecision(
 	}
 
 	return strings.Join(words, " "), nil
-}
-
-func (i *Integration) Status(p snapshot.Pane) (integration.Status, bool) {
-	if _, ok := i.Session(p, nil); !ok {
-		return integration.StatusUnknown, false
-	}
-
-	return integration.StatusUnknown, false
 }
 
 func (i *Integration) SessionID(p snapshot.Pane) (snapshot.AgentSession, bool) {

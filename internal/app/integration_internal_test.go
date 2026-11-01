@@ -30,7 +30,7 @@ func TestBuildRegistryEnabledResolvesClaude(
 	reg := buildRegistry(config.IntegrationsConfig{
 		Enabled: true,
 		Claude:  config.ClaudeIntegrationConfig{Enabled: true, Home: "~/.claude"},
-	}, "")
+	}, "", nil)
 
 	if got := reg.Resolve(
 		claudePane(),
@@ -47,7 +47,7 @@ func TestBuildRegistryMasterSwitchOff(
 	reg := buildRegistry(config.IntegrationsConfig{
 		Enabled: false,
 		Claude:  config.ClaudeIntegrationConfig{Enabled: true, Home: "~/.claude"},
-	}, "")
+	}, "", nil)
 
 	if got := reg.Resolve(claudePane()); got != "" {
 		t.Fatalf("master switch off should disable all integrations, got %q", got)
@@ -62,7 +62,7 @@ func TestBuildRegistryClaudeDisabled(
 	reg := buildRegistry(config.IntegrationsConfig{
 		Enabled: true,
 		Claude:  config.ClaudeIntegrationConfig{Enabled: false},
-	}, "")
+	}, "", nil)
 
 	if got := reg.Resolve(claudePane()); got != "" {
 		t.Fatalf("disabled claude should not resolve, got %q", got)

@@ -125,6 +125,21 @@ func (r *Registry) StatusFor(name string, pane snapshot.Pane) (Status, bool) {
 	return StatusUnknown, false
 }
 
+func (r *Registry) HasVerifiedNativeSession(pane snapshot.Pane) bool {
+	if r == nil {
+		return false
+	}
+	native, ok := r.match(pane).(interface {
+		SessionID(pane snapshot.Pane) (snapshot.AgentSession, bool)
+	})
+	if !ok {
+		return false
+	}
+	_, verified := native.SessionID(pane)
+
+	return verified
+}
+
 func (r *Registry) enrichPane(pane *snapshot.Pane) {
 	integ := r.match(*pane)
 	if integ == nil {

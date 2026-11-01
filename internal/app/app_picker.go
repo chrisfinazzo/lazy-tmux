@@ -162,7 +162,11 @@ func windowStatuses(
 			status, ok := registry.Status(pane)
 			if !ok {
 				if kind := agent.PaneKind(pane); kind != "" {
-					if _, verified := agent.Session(pane, kind); !verified {
+					if _, verified := agent.Session(
+						pane,
+						kind,
+					); !verified &&
+						!registry.HasVerifiedNativeSession(pane) {
 						statuses[window.Index] = picker.StatusNeedsSetup
 					}
 				}

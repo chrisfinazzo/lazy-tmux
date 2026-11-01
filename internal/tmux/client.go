@@ -3,7 +3,6 @@ package tmux
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -484,16 +483,18 @@ func parseCapturedPanes(output string, processes processSnapshot) []snapshot.Win
 		panePID, _ := strconv.Atoi(strings.TrimSpace(parts[6]))
 		restoreCmd := processes.foregroundCommand(panePID)
 		pane := snapshot.Pane{
-			Index:       paneIndex,
-			CurrentPath: parts[9],
-			CurrentCmd:  parts[8],
-			RestoreCmd:  strings.TrimSpace(restoreCmd),
-			Scrollback:  nil,
-			Agent:       nil,
-			IsActive:    parts[5] == "1",
-			Meta:        nil,
-			ProcessPID:  panePID,
-			ProcessArgv: nil,
+			Index:        paneIndex,
+			CurrentPath:  parts[9],
+			CurrentCmd:   parts[8],
+			RestoreCmd:   strings.TrimSpace(restoreCmd),
+			Scrollback:   nil,
+			Agent:        nil,
+			IsActive:     parts[5] == "1",
+			Meta:         nil,
+			ProcessPID:   panePID,
+			ProcessArgv:  nil,
+			LiveStatus:   "",
+			LiveStatusID: "",
 		}
 		pane = attachAgentBindings(
 			pane,
@@ -757,22 +758,22 @@ func (client *Client) CapturePane(target string) (snapshot.Pane, error) {
 	panePID, _ := strconv.Atoi(parts[2])
 
 	pane := snapshot.Pane{
-		Index:       0,
-		CurrentPath: parts[1],
-		CurrentCmd:  parts[0],
-		RestoreCmd:  strings.TrimSpace(processes.foregroundCommand(panePID)),
-		Scrollback:  nil,
-		Agent:       nil,
-		IsActive:    true,
-		Meta:        nil,
-		ProcessArgv: nil,
-		ProcessPID:  panePID,
+		Index:        0,
+		CurrentPath:  parts[1],
+		CurrentCmd:   parts[0],
+		RestoreCmd:   strings.TrimSpace(processes.foregroundCommand(panePID)),
+		Scrollback:   nil,
+		Agent:        nil,
+		IsActive:     true,
+		Meta:         nil,
+		ProcessArgv:  nil,
+		LiveStatus:   "",
+		LiveStatusID: "",
+		ProcessPID:   panePID,
 	}
-	if pane.ProcessPID > 0 {
-		argv, argvErr := processes.agentProcessArgv(panePID)
-		if argvErr == nil {
-			pane.ProcessArgv = argv
-		}
+	argv, argvErr := processes.agentProcessArgv(panePID)
+	if argvErr == nil {
+		pane.ProcessArgv = argv
 	}
 	pane = attachAgentBindings(pane, parts[5], parts[6], panePID, parts[3], parts[4], processes)
 	pane = processes.attachPiBinding(pane, parts[7])
@@ -1573,6 +1574,9 @@ func (client *Client) createdFirstWindowIndex(session string) (int, error) {
 // agentProcessArgv reads the agent, not the pane's login shell. Process titles
 // may be shortened to "pi", so ps command strings are not launch arguments.
 func (snapshot processSnapshot) agentProcessArgv(rootPID int) ([]string, error) {
+	if rootPID <= 0 {
+		return nil, errHookOwner
+	}
 	for _, process := range snapshot.descendants(rootPID) {
 		if !strings.Contains(process.stat, "+") {
 			continue
@@ -1584,55 +1588,4 @@ func (snapshot processSnapshot) agentProcessArgv(rootPID int) ([]string, error) 
 	}
 
 	return processArgv(rootPID)
-}
-
-func (processes processSnapshot) attachPiBinding(pane snapshot.Pane, encoded string) snapshot.Pane {
-	var binding struct {
-		PID       int    `json:"pid"`
-		File      string `json:"file"`
-		Version   int    `json:"version"`
-		StartedAt string `json:"started_at"`
-	}
-	if json.Unmarshal([]byte(encoded), &binding) != nil || binding.Version != 1 ||
-		binding.StartedAt == "" ||
-		(binding.File != "" && !filepath.IsAbs(binding.File)) {
-		return pane
-	}
-	candidates := processes.descendants(pane.ProcessPID)
-	if root, ok := processes.processes[pane.ProcessPID]; ok {
-		candidates = append(candidates, root)
-	}
-	for _, process := range candidates {
-		if process.pid != binding.PID || !piForegroundOwner(process) {
-			continue
-		}
-		argv, err := processArgv(process.pid)
-		if err != nil || agent.LaunchKind(argv) != "pi" ||
-			processStartTime(binding.PID) != binding.StartedAt {
-			return pane
-		}
-		if pane.Meta == nil {
-			pane.Meta = make(map[string]string)
-		}
-		delete(pane.Meta, agent.PendingKey)
-		delete(pane.Meta, "pi.session_id")
-		if binding.File == "" {
-			delete(pane.Meta, "pi.session_file")
-			pane.ProcessArgv = []string{"pi", "--no-session"}
-			pane.RestoreCmd = "pi --no-session"
-
-			return pane
-		}
-		pane.Meta["pi.session_file"] = binding.File
-		pane.ProcessArgv = []string{"pi", "--session", binding.File}
-		pane.RestoreCmd = "pi"
-
-		return pane
-	}
-
-	return pane
-}
-
-func piForegroundOwner(process psProcess) bool {
-	return strings.Contains(process.stat, "+") && !strings.ContainsAny(process.stat, "TZ")
 }

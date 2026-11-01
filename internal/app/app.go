@@ -108,7 +108,7 @@ func New(cfg config.Config) *App {
 	client.SetRestoreAllowlist(cfg.RestoreAllowlist)
 	client.SetRestoreDenylist(cfg.RestoreDenylist)
 
-	registry := buildRegistry(cfg.Integrations, ClaudeStatusDir(cfg.DataDir))
+	registry := buildRegistry(cfg.Integrations, ClaudeStatusDir(cfg.DataDir), client.CapturePiPanes)
 	client.SetRestoreResolver(registry)
 
 	return &App{
@@ -127,7 +127,11 @@ func ClaudeStatusDir(dataDir string) string {
 	return filepath.Join(dataDir, "claude-status")
 }
 
-func buildRegistry(cfg config.IntegrationsConfig, statusDir string) *integration.Registry {
+func buildRegistry(
+	cfg config.IntegrationsConfig,
+	statusDir string,
+	piStatus pi.StatusLoader,
+) *integration.Registry {
 	if !cfg.Enabled {
 		return integration.NewRegistry()
 	}
@@ -137,7 +141,7 @@ func buildRegistry(cfg config.IntegrationsConfig, statusDir string) *integration
 	if cfg.Pi.Enabled {
 		items = append(items, pi.New(
 			config.ExpandHome(cfg.Pi.Home), config.ExpandHome(cfg.Pi.SessionDir),
-		))
+		).WithStatusLoader(piStatus))
 	}
 	if cfg.Codex.Enabled {
 		items = append(items, codex.New(config.ExpandHome(cfg.Codex.Home)))
