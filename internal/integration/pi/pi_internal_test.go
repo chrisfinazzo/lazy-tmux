@@ -114,3 +114,94 @@ func TestPiMetadataRoundTrip(t *testing.T) {
 }
 
 func quote(v string) string { return "'" + strings.ReplaceAll(v, "'", "'\"'\"'") + "'" }
+
+func TestLargeSessionRecordsAndLiveArguments(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	file := writeSession(t, root, "live", root)
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(
+		map[string]any{"type": "message", "text": strings.Repeat("x", 200000)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Write(append(data, '\n'))
+	if closeErr := f.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := writeSession(t, root, "stale", root)
+	pane := snapshot.Pane{
+		CurrentCmd: "node", RestoreCmd: "pi --session " + stale, CurrentPath: root,
+		ProcessArgv: []string{"node", "/opt/pi/dist/cli.js", "--session", file},
+	}
+	// Explicit live identity must win over a stale restoration command.
+	pane.CurrentCmd = "pi"
+	value, ok := New(root, root).Session(pane, nil)
+	if !ok || value.ID != "live" {
+		t.Fatalf("large live session not captured: %#v, %v", value, ok)
+	}
+}
+
+func TestSessionDirectorySymlink(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	file := writeSession(t, root, "linked", alias)
+	value, ok := New(
+		root,
+		root,
+	).Session(snapshot.Pane{CurrentCmd: "pi", CurrentPath: root, Meta: map[string]string{"pi.session_file": file}}, nil)
+	if !ok || value.ID != "linked" {
+		t.Fatal("symlink cwd lost identity")
+	}
+}
+
+func TestSingleFileDoesNotProveLiveIdentity(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeSession(t, root, "unrelated", root)
+	if _, ok := New(
+		root,
+		root,
+	).Session(snapshot.Pane{CurrentCmd: "pi", CurrentPath: root}, nil); ok {
+		t.Fatal("guessed a session from directory contents")
+	}
+}
+
+func TestNoSessionLiveArgumentsOverrideSavedMetadata(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	file := writeSession(t, root, "old", root)
+	pane := snapshot.Pane{
+		CurrentCmd:  "pi",
+		CurrentPath: root,
+		ProcessArgv: []string{"pi", "--no-session"},
+		Meta:        map[string]string{"pi.session_file": file},
+	}
+	if _, ok := New(root, root).Session(pane, nil); ok {
+		t.Fatal("bound nonpersistent client to old history")
+	}
+}
+
+func TestNonInteractiveClientsNeverBind(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	file := writeSession(t, root, "saved", root)
+	for _, flags := range [][]string{{"--print"}, {"-p"}, {"--mode", "rpc"}, {"--mode=json"}} {
+		argv := append([]string{"pi", "--session", file}, flags...)
+		pane := snapshot.Pane{CurrentCmd: "pi", CurrentPath: root, ProcessArgv: argv}
+		if _, ok := New(root, root).Session(pane, nil); ok {
+			t.Fatalf("bound noninteractive client: %v", flags)
+		}
+	}
+}

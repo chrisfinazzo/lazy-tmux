@@ -1,11 +1,11 @@
 package pi
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,11 +127,12 @@ func (i *Integration) SessionID(p snapshot.Pane) (snapshot.AgentSession, bool) {
 func (i *Integration) Session(
 	pane snapshot.Pane, metadata map[string]string,
 ) (snapshot.AgentSession, bool) {
-	if !i.Matches(pane) || noSession(pane.CurrentCmd) || noSession(pane.RestoreCmd) {
+	if !i.Matches(pane) || noSession(pane.CurrentCmd) || noSession(pane.RestoreCmd) ||
+		nonInteractive(pane.ProcessArgv) {
 		return snapshot.AgentSession{}, false
 	}
-	file := ""
-	if metadata != nil {
+	file := sessionFileFromArgv(pane.ProcessArgv)
+	if file == "" && metadata != nil {
 		file = metadata["session_file"]
 	}
 	if file == "" {
@@ -140,21 +141,17 @@ func (i *Integration) Session(
 	if file == "" {
 		file = sessionFileFromCommand(pane.RestoreCmd)
 	}
-	if file == "" {
-		file = sessionFileFromArgv(pane.ProcessArgv)
-	}
+
 	if file == "" && pane.ProcessPID > 0 {
 		file = i.openSessionFile(pane.ProcessPID)
 	}
-	if file == "" {
-		file = i.uniqueFile(pane.CurrentPath)
-	}
+
 	if file == "" {
 		return snapshot.AgentSession{}, false
 	}
 	header, model, err := readSession(file)
 	if err != nil || header.ID == "" || header.CWD == "" ||
-		filepath.Clean(header.CWD) != filepath.Clean(pane.CurrentPath) {
+		!sameDirectory(header.CWD, pane.CurrentPath) {
 		return snapshot.AgentSession{}, false
 	}
 	if metadata != nil && metadata["session_id"] != "" && metadata["session_id"] != header.ID {
@@ -205,14 +202,19 @@ func readSession(path string) (sessionHeader, string, error) {
 		return sessionHeader{}, "", fmt.Errorf("open pi session: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	scanner := bufio.NewScanner(f)
+	decoder := json.NewDecoder(f)
 	var header sessionHeader
 	model := ""
 	first := true
-	for scanner.Scan() {
+	for {
 		var record map[string]any
-		if json.Unmarshal(scanner.Bytes(), &record) != nil {
-			continue
+		err := decoder.Decode(&record)
+		if err != nil {
+			if errors.Is(err, io.EOF) || (!first && errors.Is(err, io.ErrUnexpectedEOF)) {
+				break
+			}
+
+			return sessionHeader{}, "", fmt.Errorf("read pi session: %w", err)
 		}
 		if first {
 			first = false
@@ -235,10 +237,6 @@ func readSession(path string) (sessionHeader, string, error) {
 				model = strings.Trim(provider+"/"+modelID, "/")
 			}
 		}
-	}
-	err = scanner.Err()
-	if err != nil {
-		return sessionHeader{}, "", fmt.Errorf("read pi session: %w", err)
 	}
 
 	return header, model, nil
@@ -303,40 +301,6 @@ func processTree(root int) []int {
 	return result
 }
 
-func (i *Integration) uniqueFile(cwd string) string {
-	var found string
-	count := 0
-	var anyFound string
-	anyCount := 0
-	_ = filepath.WalkDir(i.sessionDir, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() || filepath.Ext(path) != jsonlSuffix {
-			return nil
-		}
-		h, _, err := readSession(path)
-		if err == nil {
-			anyFound = path
-			anyCount++
-			if filepath.Clean(h.CWD) == filepath.Clean(cwd) {
-				found = path
-				count++
-			}
-		}
-
-		return nil
-	})
-	if count == 1 {
-		return found
-	}
-	if count == 0 && anyCount == 1 {
-		return anyFound
-	}
-
-	return ""
-}
-
 func within(path, root string) bool {
 	rel, err := filepath.Rel(root, path)
 
@@ -345,4 +309,33 @@ func within(path, root string) bool {
 
 func isSessionPath(path, root string) bool {
 	return filepath.Ext(path) == jsonlSuffix && within(path, root)
+}
+
+func sameDirectory(first, second string) bool {
+	if filepath.Clean(first) == filepath.Clean(second) {
+		return true
+	}
+	left, err := filepath.EvalSymlinks(first)
+	if err != nil {
+		return false
+	}
+	right, err := filepath.EvalSymlinks(second)
+
+	return err == nil && left == right
+}
+
+func nonInteractive(argv []string) bool {
+	for index, arg := range argv {
+		if slices.Contains([]string{"--no-session", "--print", "-p"}, arg) {
+			return true
+		}
+		if strings.HasPrefix(arg, "--mode=") && arg != "--mode=text" {
+			return true
+		}
+		if arg == "--mode" && index+1 < len(argv) && argv[index+1] != "text" {
+			return true
+		}
+	}
+
+	return false
 }

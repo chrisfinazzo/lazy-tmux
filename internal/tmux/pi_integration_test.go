@@ -11,6 +11,7 @@ import (
 
 	"github.com/alchemmist/lazy-tmux/internal/integration"
 	"github.com/alchemmist/lazy-tmux/internal/integration/pi"
+	"github.com/alchemmist/lazy-tmux/internal/integration/setup"
 	"github.com/alchemmist/lazy-tmux/internal/snapshot"
 	"github.com/alchemmist/lazy-tmux/internal/testutil"
 	"github.com/alchemmist/lazy-tmux/internal/tmux"
@@ -22,6 +23,9 @@ func TestRealPiSessionSnapshotRestoreAndIsolation(t *testing.T) {
 	}
 	testutil.IsolatedTmux(t)
 	home := t.TempDir()
+	if _, err := setup.EnsurePi(home); err != nil {
+		t.Fatal(err)
+	}
 	sessionDir := filepath.Join(home, "sessions")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -60,18 +64,17 @@ func TestRealPiSessionSnapshotRestoreAndIsolation(t *testing.T) {
 	}
 	after := waitForPiSnapshot(t, client, registry, name, sessionFile, "A")
 	pane := after.Windows[0].Panes[0]
-	if pane.CurrentCmd != "pi" && pane.CurrentCmd != "node" {
+	if len(pane.ProcessArgv) == 0 || pane.ProcessArgv[0] != "pi" {
 		t.Fatalf("restored command = %q, pane output: %q", pane.CurrentCmd, capturePane(t, name))
-	}
-	output := capturePane(t, name)
-	if strings.Contains(output, "B.jsonl") || !strings.Contains(output, "A.jsonl") {
-		t.Fatalf("restore did not bind exact A session: %q", capturePane(t, name))
 	}
 }
 
 func TestRealPiRestoreUsesShellAssignmentBeforeCd(t *testing.T) {
 	testutil.IsolatedTmux(t)
 	home := t.TempDir()
+	if _, err := setup.EnsurePi(home); err != nil {
+		t.Fatal(err)
+	}
 	cwd := filepath.Join(t.TempDir(), "space cwd")
 	if err := os.Mkdir(cwd, 0o755); err != nil {
 		t.Fatal(err)
@@ -124,16 +127,20 @@ func TestRealPiRestoreUsesShellAssignmentBeforeCd(t *testing.T) {
 func TestRealPiNoSessionIsUnbound(t *testing.T) {
 	testutil.IsolatedTmux(t)
 	dir := t.TempDir()
+	home := t.TempDir()
+	if _, err := setup.EnsurePi(home); err != nil {
+		t.Fatal(err)
+	}
 	testutil.Tmux(
 		t, "new-session", "-d", "-s", "pi-no-session", "-c", dir,
-		"env PI_OFFLINE=1 pi --no-tools --no-session",
+		"env PI_OFFLINE=1 PI_CODING_AGENT_DIR="+home+" pi --no-tools --no-session",
 	)
 	client := tmux.NewClient("tmux")
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		captured, err := client.CaptureSession("pi-no-session")
 		if err == nil && len(captured.Windows) > 0 &&
-			captured.Windows[0].Panes[0].CurrentCmd == "pi" {
+			(captured.Windows[0].Panes[0].CurrentCmd == "pi" || captured.Windows[0].Panes[0].CurrentCmd == "node") {
 			if _, ok := pi.New(t.TempDir(), t.TempDir()).SessionID(
 				captured.Windows[0].Panes[0],
 			); ok {
@@ -150,16 +157,16 @@ func TestRealPiNoSessionIsUnbound(t *testing.T) {
 func TestRealPiMultiplePanesKeepIndependentSessions(t *testing.T) {
 	testutil.IsolatedTmux(t)
 	home := t.TempDir()
+	if _, err := setup.EnsurePi(home); err != nil {
+		t.Fatal(err)
+	}
 	sessionDir := filepath.Join(home, "sessions")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	firstCWD := filepath.Join(t.TempDir(), "first tree")
-	secondCWD := filepath.Join(t.TempDir(), "second tree")
+	secondCWD := firstCWD
 	if err := os.Mkdir(firstCWD, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(secondCWD, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	firstFile := filepath.Join(sessionDir, "first.jsonl")
@@ -197,6 +204,9 @@ func TestRealPiMultiplePanesKeepIndependentSessions(t *testing.T) {
 func TestRealPiMissingSessionRequestsManualReview(t *testing.T) {
 	testutil.IsolatedTmux(t)
 	home := t.TempDir()
+	if _, err := setup.EnsurePi(home); err != nil {
+		t.Fatal(err)
+	}
 	cwd := t.TempDir()
 	file := filepath.Join(home, "missing.jsonl")
 	const name = "pi-missing"
@@ -221,7 +231,14 @@ func TestRealPiMissingSessionRequestsManualReview(t *testing.T) {
 	if err := client.RestoreSession(context.Background(), snap); err != nil {
 		t.Fatal(err)
 	}
-	if output := capturePane(t, name); !strings.Contains(output, "manual review") {
+	if output := strings.ReplaceAll(
+		capturePane(t, name),
+		"\n",
+		"",
+	); !strings.Contains(
+		output,
+		"manual review",
+	) {
 		t.Fatalf("missing session diagnostic: %q", output)
 	}
 }
@@ -236,6 +253,7 @@ func waitForPiSnapshot(
 		if err == nil {
 			registry.Enrich(&captured)
 			if len(captured.Windows) > 0 && len(captured.Windows[0].Panes) > 0 &&
+				captured.Windows[0].Panes[0].Meta["agent.restore_pending"] == "" &&
 				captured.Windows[0].Panes[0].Meta["pi.session_id"] == id &&
 				captured.Windows[0].Panes[0].Meta["pi.session_file"] == file {
 				return captured
@@ -275,4 +293,114 @@ func capturePane(t *testing.T, session string) string {
 	t.Helper()
 
 	return testutil.Tmux(t, "capture-pane", "-p", "-t", session+":0.0")
+}
+
+func TestRealPiSwitchSameDirectoryAndRestore(t *testing.T) {
+	if os.Getenv("ENABLE_REAL_PI_TESTS") != "true" {
+		t.Skip("real Pi required")
+	}
+	testutil.IsolatedTmux(t)
+	home, cwd := t.TempDir(), t.TempDir()
+	if _, err := setup.EnsurePi(home); err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	first, second := filepath.Join(
+		sessionDir,
+		"first.jsonl",
+	), filepath.Join(
+		sessionDir,
+		"second.jsonl",
+	)
+	writePiSession(t, first, "first", cwd)
+	writePiSession(t, second, "second", cwd)
+	target, err := json.Marshal(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extension := `export default function(pi) {
+ pi.registerCommand("test-switch", {description:"test only",
+ handler:async (_args,ctx)=>{ await ctx.switchSession(` + string(
+		target,
+	) + `); }}); }`
+	if err := os.WriteFile(
+		filepath.Join(home, "extensions", "test-switch.ts"),
+		[]byte(extension),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	startPi(t, "pi-switch", cwd, first, home, sessionDir)
+	client := tmux.NewClient("tmux")
+	registry := integration.NewRegistry(pi.New(home, sessionDir))
+	client.SetRestoreResolver(registry)
+	client.SetRestoreTimeout(0)
+	waitForPiSnapshot(t, client, registry, "pi-switch", first, "first")
+	testutil.Tmux(t, "send-keys", "-t", "pi-switch:0.0", "-l", "/test-switch")
+	testutil.Tmux(t, "send-keys", "-t", "pi-switch:0.0", "Enter")
+	saved := waitForPiSnapshot(t, client, registry, "pi-switch", second, "second")
+	// A stale pane-local value must not survive PID reuse or claim another owner.
+	rawBinding := testutil.Tmux(
+		t,
+		"show-option",
+		"-p",
+		"-v",
+		"-t",
+		"pi-switch:0.0",
+		"@lazy_tmux_pi_binding",
+	)
+	for _, field := range []string{"started_at", "pid", "version"} {
+		var binding map[string]any
+		if err := json.Unmarshal([]byte(rawBinding), &binding); err != nil {
+			t.Fatal(err)
+		}
+		switch field {
+		case "started_at":
+			binding[field] = "stale process"
+		case "pid":
+			binding[field] = os.Getpid()
+		case "version":
+			binding[field] = 99
+		}
+		data, err := json.Marshal(binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		testutil.Tmux(
+			t,
+			"set-option",
+			"-p",
+			"-t",
+			"pi-switch:0.0",
+			"@lazy_tmux_pi_binding",
+			string(data),
+		)
+		captured, err := client.CaptureSession("pi-switch")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if captured.Windows[0].Panes[0].Meta["pi.session_file"] != "" {
+			t.Fatalf("accepted stale %s binding", field)
+		}
+	}
+	testutil.Tmux(
+		t,
+		"set-option",
+		"-p",
+		"-t",
+		"pi-switch:0.0",
+		"@lazy_tmux_pi_binding",
+		strings.TrimSpace(rawBinding),
+	)
+
+	if err := client.KillSession("pi-switch"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.RestoreSession(context.Background(), saved); err != nil {
+		t.Fatal(err)
+	}
+	waitForPiSnapshot(t, client, registry, "pi-switch", second, "second")
 }

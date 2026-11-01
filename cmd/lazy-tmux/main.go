@@ -101,6 +101,14 @@ func main() {
 }
 
 func runCLI(args []string, stdout, stderr io.Writer) int {
+	return runCLIWithPreparation(args, stdout, stderr, preparePi)
+}
+
+func runCLIWithPreparation(
+	args []string,
+	stdout, stderr io.Writer,
+	prepare func(string, []string, io.Writer) error,
+) int {
 	if len(args) == 0 {
 		printUsage(stdout)
 
@@ -132,6 +140,13 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	cmd, ok := commands()[cmdName]
 	if !ok {
 		writeErr(stderr, fmt.Errorf("%w: %s", errUnknownCommand, cmdName))
+
+		return 1
+	}
+
+	err := prepare(cmdName, args[1:], stderr)
+	if err != nil {
+		writeErr(stderr, err)
 
 		return 1
 	}

@@ -78,3 +78,13 @@ home = "~/.claude"
 enabled = true
 # Antex data directory containing sessions/YYYY/MM/DD/rollout-*.jsonl files.
 home = "~/.antex"
+
+# Pi: the embedded identity extension is installed automatically by normal tmux
+# workflows. Newly started Pi clients load it without manual setup. Existing
+# clients need /reload when idle. Set enabled=false to disable integration.
+[integrations.pi]
+enabled = true
+# Defaults honor PI_CODING_AGENT_DIR and PI_CODING_AGENT_SESSION_DIR.
+# Uncomment to override those defaults explicitly.
+# home = "~/.pi/agent"
+# session_dir = "~/.pi/agent/sessions"

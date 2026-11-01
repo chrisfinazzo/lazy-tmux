@@ -3,6 +3,7 @@ package tmux
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -428,7 +429,7 @@ func (client *Client) CaptureSession(name string) (snapshot.SessionSnapshot, err
 			"#{@lazy_tmux_restore_pending}"+fieldSep+
 			"#{?@lazy_tmux_restore_ack,#{@lazy_tmux_restore_ack},#{@antex_restore_ack}}"+fieldSep+
 			"#{@lazy_tmux_agent_binding}"+fieldSep+
-			"#{@antex_binding}",
+			"#{@antex_binding}"+fieldSep+"#{@lazy_tmux_pi_binding}",
 	)
 	if err != nil {
 		return snapshot.SessionSnapshot{}, err
@@ -504,12 +505,13 @@ func parseCapturedPanes(output string, processes processSnapshot) []snapshot.Win
 			processes,
 		)
 		if pane.CurrentCmd == "pi" || pane.CurrentCmd == "node" {
-			argv, argvErr := processArgv(panePID)
+			argv, argvErr := processes.agentProcessArgv(panePID)
 			if argvErr == nil {
 				pane.ProcessArgv = argv
 			}
 		}
 		pane = preserveRestoreIntent(pane, parts[12], parts[13])
+		pane = processes.attachPiBinding(pane, parts[16])
 		if pane.IsActive {
 			window.ActivePane = pane.Index
 		}
@@ -716,7 +718,7 @@ func (client *Client) CapturePaneScrollback(target string, lines int) (string, e
 	)
 }
 
-func (client *Client) CapturePane(target string) (snapshot.Pane, error) { //nolint:funlen
+func (client *Client) CapturePane(target string) (snapshot.Pane, error) {
 	args := []string{
 		"display-message",
 		"-p",
@@ -732,7 +734,7 @@ func (client *Client) CapturePane(target string) (snapshot.Pane, error) { //noli
 			"#{pane_id}"+fieldSep+
 			"#{socket_path}"+fieldSep+
 			"#{@lazy_tmux_agent_binding}"+fieldSep+
-			"#{@antex_binding}",
+			"#{@antex_binding}"+fieldSep+"#{@lazy_tmux_pi_binding}",
 	)
 
 	out, err := client.Output(args...)
@@ -764,21 +766,16 @@ func (client *Client) CapturePane(target string) (snapshot.Pane, error) { //noli
 		IsActive:    true,
 		Meta:        nil,
 		ProcessArgv: nil,
-		ProcessPID: func() int {
-			if parts[0] == "pi" || parts[0] == "node" {
-				return panePID
-			}
-
-			return 0
-		}(),
+		ProcessPID:  panePID,
 	}
 	if pane.ProcessPID > 0 {
-		argv, argvErr := processArgv(panePID)
+		argv, argvErr := processes.agentProcessArgv(panePID)
 		if argvErr == nil {
 			pane.ProcessArgv = argv
 		}
 	}
 	pane = attachAgentBindings(pane, parts[5], parts[6], panePID, parts[3], parts[4], processes)
+	pane = processes.attachPiBinding(pane, parts[7])
 
 	return pane, nil
 }
@@ -1414,8 +1411,8 @@ func pickFromCandidates(allProcesses []psProcess) string {
 }
 
 const (
-	livePaneLineFields    = 7
-	capturePaneLineFields = 16
+	livePaneLineFields    = 8
+	capturePaneLineFields = 17
 	paneCommandFields     = 3
 	psLineFields          = 4
 )
@@ -1571,4 +1568,71 @@ func (client *Client) createdFirstWindowIndex(session string) (int, error) {
 	}
 
 	return idx, nil
+}
+
+// agentProcessArgv reads the agent, not the pane's login shell. Process titles
+// may be shortened to "pi", so ps command strings are not launch arguments.
+func (snapshot processSnapshot) agentProcessArgv(rootPID int) ([]string, error) {
+	for _, process := range snapshot.descendants(rootPID) {
+		if !strings.Contains(process.stat, "+") {
+			continue
+		}
+		argv, err := processArgv(process.pid)
+		if err == nil && agent.LaunchKind(argv) == "pi" {
+			return argv, nil
+		}
+	}
+
+	return processArgv(rootPID)
+}
+
+func (processes processSnapshot) attachPiBinding(pane snapshot.Pane, encoded string) snapshot.Pane {
+	var binding struct {
+		PID       int    `json:"pid"`
+		File      string `json:"file"`
+		Version   int    `json:"version"`
+		StartedAt string `json:"started_at"`
+	}
+	if json.Unmarshal([]byte(encoded), &binding) != nil || binding.Version != 1 ||
+		binding.StartedAt == "" ||
+		(binding.File != "" && !filepath.IsAbs(binding.File)) {
+		return pane
+	}
+	candidates := processes.descendants(pane.ProcessPID)
+	if root, ok := processes.processes[pane.ProcessPID]; ok {
+		candidates = append(candidates, root)
+	}
+	for _, process := range candidates {
+		if process.pid != binding.PID || !piForegroundOwner(process) {
+			continue
+		}
+		argv, err := processArgv(process.pid)
+		if err != nil || agent.LaunchKind(argv) != "pi" ||
+			processStartTime(binding.PID) != binding.StartedAt {
+			return pane
+		}
+		if pane.Meta == nil {
+			pane.Meta = make(map[string]string)
+		}
+		delete(pane.Meta, agent.PendingKey)
+		delete(pane.Meta, "pi.session_id")
+		if binding.File == "" {
+			delete(pane.Meta, "pi.session_file")
+			pane.ProcessArgv = []string{"pi", "--no-session"}
+			pane.RestoreCmd = "pi --no-session"
+
+			return pane
+		}
+		pane.Meta["pi.session_file"] = binding.File
+		pane.ProcessArgv = []string{"pi", "--session", binding.File}
+		pane.RestoreCmd = "pi"
+
+		return pane
+	}
+
+	return pane
+}
+
+func piForegroundOwner(process psProcess) bool {
+	return strings.Contains(process.stat, "+") && !strings.ContainsAny(process.stat, "TZ")
 }

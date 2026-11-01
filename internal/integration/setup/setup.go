@@ -21,7 +21,7 @@ const (
 )
 
 var (
-	errAgentKind = errors.New("setup supports codex and claude")
+	errAgentKind = errors.New("setup supports codex, claude and pi")
 	errHookShape = errors.New("invalid hook configuration")
 )
 
@@ -48,6 +48,9 @@ func location(kind string) (string, error) {
 }
 
 func Apply(kind, home, binary string, uninstall bool) (bool, error) {
+	if kind == "pi" {
+		return applyPi(home, uninstall, false)
+	}
 	name, err := location(kind)
 	if err != nil {
 		return false, err
@@ -234,6 +237,9 @@ func hookLine(kind, home, binary string) string {
 }
 
 func Check(kind, home, binary string) (bool, error) {
+	if kind == "pi" {
+		return checkPi(home)
+	}
 	name, err := location(kind)
 	if err != nil {
 		return false, err

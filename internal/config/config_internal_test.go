@@ -357,3 +357,24 @@ func writeConfig(t *testing.T, body string) string {
 
 	return path
 }
+
+func TestPiEnvironmentDefaultsAndExplicitOverrides(t *testing.T) {
+	home, sessions := t.TempDir(), t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", home)
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", sessions)
+	cfg, err := LoadFrom(filepath.Join(t.TempDir(), "absent.toml"))
+	if err != nil || cfg.Integrations.Pi.Home != home ||
+		cfg.Integrations.Pi.SessionDir != sessions {
+		t.Fatalf("environment ignored: %+v %v", cfg.Integrations.Pi, err)
+	}
+	cfg, err = LoadFrom(
+		writeConfig(
+			t,
+			"[integrations.pi]\nhome='/explicit/home'\nsession_dir='/explicit/sessions'\n",
+		),
+	)
+	if err != nil || cfg.Integrations.Pi.Home != "/explicit/home" ||
+		cfg.Integrations.Pi.SessionDir != "/explicit/sessions" {
+		t.Fatalf("explicit config ignored: %+v %v", cfg.Integrations.Pi, err)
+	}
+}

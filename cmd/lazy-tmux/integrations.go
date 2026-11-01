@@ -25,9 +25,8 @@ const maxHookInput = 1024 * 1024
 
 var (
 	errIntegrationSubcommand = errors.New("unknown integrations subcommand")
-	errIntegrationKind       = errors.New("specify codex or claude")
+	errIntegrationKind       = errors.New("specify codex, claude or pi")
 	errRepairTarget          = errors.New("specify session, window and pane")
-	errPiNative              = errors.New("pi integration is native; no hooks need to be installed")
 	errPiRepairFile          = errors.New("pi repair requires --file")
 )
 
@@ -48,8 +47,8 @@ func agentHome(cfg config.Config, kind string) string {
 
 func integrationsHelp(w io.Writer) {
 	_, _ = fmt.Fprint(w, `Usage: lazy-tmux integrations <setup|doctor|repair>
-  setup <codex|claude> [--uninstall]  install owned lifecycle hooks; client trust remains explicit
-  Pi uses its JSONL session files and does not require hooks
+  setup <codex|claude|pi> [--uninstall]  install owned lifecycle hooks; client trust remains explicit
+  Pi extension is embedded and installed automatically by normal tmux workflows; restart/reload pre-existing Pi clients
   doctor                           report installed hooks and live pane verification
   repair --session NAME --window N --pane N --agent NAME --sessionID ID [--home PATH] [--apply]
                                    preview a saved pane repair; --apply saves it with a backup
@@ -91,9 +90,7 @@ func setupIntegration(args []string, cfg config.Config, stdout io.Writer) error 
 		return errIntegrationKind
 	}
 	kind := args[0]
-	if kind == snapshot.AgentPi {
-		return errPiNative
-	}
+
 	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	uninstall := flags.Bool("uninstall", false, "remove owned hooks")
@@ -111,6 +108,17 @@ func setupIntegration(args []string, cfg config.Config, stdout io.Writer) error 
 	changed, err := setup.Apply(kind, agentHome(cfg, kind), binary, *uninstall)
 	if err != nil {
 		return fmt.Errorf("configure integration: %w", err)
+	}
+	if kind == snapshot.AgentPi {
+		_, _ = fmt.Fprintf(
+			stdout,
+			"pi extension: changed=%t removed=%t; new Pi clients load it automatically; "+
+				"restart or /reload pre-existing clients when idle\n",
+			changed,
+			*uninstall,
+		)
+
+		return nil
 	}
 	_, _ = fmt.Fprintf(
 		stdout,
@@ -131,7 +139,7 @@ func doctorIntegrations(cfg config.Config, stdout io.Writer) error {
 	for _, kind := range []string{snapshot.AgentCodex, snapshot.AgentAntex, snapshot.AgentClaude, snapshot.AgentPi} {
 		executable, lookErr := exec.LookPath(kind)
 		installed := false
-		if kind != snapshot.AgentAntex && kind != snapshot.AgentPi {
+		if kind != snapshot.AgentAntex {
 			installed, err = setup.Check(kind, agentHome(cfg, kind), binary)
 			if err != nil {
 				return fmt.Errorf("inspect %s: %w", kind, err)
@@ -139,7 +147,7 @@ func doctorIntegrations(cfg config.Config, stdout io.Writer) error {
 		}
 		_, _ = fmt.Fprintf(
 			stdout,
-			"%s: executable=%q available=%t hooks_installed=%t version=%q; "+
+			"%s: executable=%q available=%t integration_installed=%t version=%q; "+
 				"session metadata verification is required; compatibility/trust not certified\n",
 			kind,
 			executable,

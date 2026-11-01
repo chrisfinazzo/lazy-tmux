@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +23,12 @@ func run(t *testing.T, args ...string) (int, string, string) {
 
 	var out, errOut bytes.Buffer
 
-	code := runCLI(args, &out, &errOut)
+	code := runCLIWithPreparation(
+		args,
+		&out,
+		&errOut,
+		func(string, []string, io.Writer) error { return nil },
+	)
 
 	return code, out.String(), errOut.String()
 }
@@ -187,7 +193,7 @@ func TestCLIAntexForkRejectsBackgroundBinding(t *testing.T) {
 	}
 	t.Setenv(
 		"LAZY_TMUX_TEST_PANE",
-		fmt.Sprintf("antex|/work tree|%d|%%7|/tmp/test-socket||%s", os.Getpid(), binding),
+		fmt.Sprintf("antex|/work tree|%d|%%7|/tmp/test-socket||%s|", os.Getpid(), binding),
 	)
 	tmuxBin := filepath.Join(t.TempDir(), "tmux")
 	logPath := filepath.Join(t.TempDir(), "tmux-args")

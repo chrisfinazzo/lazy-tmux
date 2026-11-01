@@ -54,6 +54,11 @@ func (client *Client) stageAgentRestore(
 		return "", err
 	}
 
+	if agent.PaneKind(pane) == snapshot.AgentPi {
+		// Propagate the acknowledgement token across a leading `cd && env pi`.
+		return "LAZY_TMUX_RESTORE_TOKEN=" + intent.Token + " sh -c " + agent.Quote(command), nil
+	}
+
 	return "LAZY_TMUX_RESTORE_TOKEN=" + intent.Token + " " + command, nil
 }
 

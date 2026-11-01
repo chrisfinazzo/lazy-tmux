@@ -98,7 +98,11 @@ func Default() Config {
 		Integrations: IntegrationsConfig{
 			Enabled: true,
 			Codex:   AgentIntegrationConfig{Enabled: true, Home: "~/.codex", SessionDir: ""},
-			Pi:      AgentIntegrationConfig{Enabled: true, Home: "~/.pi/agent", SessionDir: ""},
+			Pi: AgentIntegrationConfig{
+				Enabled:    true,
+				Home:       piHome(),
+				SessionDir: os.Getenv("PI_CODING_AGENT_SESSION_DIR"),
+			},
 			Claude: ClaudeIntegrationConfig{
 				Enabled: true,
 				Home:    defaultClaudeHome,
@@ -465,4 +469,12 @@ func ExpandHome(path string) string {
 	}
 
 	return path
+}
+
+func piHome() string {
+	if home := os.Getenv("PI_CODING_AGENT_DIR"); home != "" {
+		return home
+	}
+
+	return "~/.pi/agent"
 }

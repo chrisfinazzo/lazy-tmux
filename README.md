@@ -102,3 +102,42 @@ Restoration keeps the original intent until a matching startup receipt or a veri
 - `LAZY_TMUX_REAL_CLAUDE_HOME` and `LAZY_TMUX_REAL_CLAUDE_VERSION`
 
 Each dedicated home must contain `.lazy-tmux-test-home` with `codex` or `claude`, respectively. Never point the test at your normal client home. The target fails when required inputs are missing; the ordinary suite explicitly skips these credential-dependent tests. No Codex/Claude client version is certified solely by the replay tests. The current implementation follows [Codex hooks](https://learn.chatgpt.com/docs/hooks) and [Claude Code hooks](https://code.claude.com/docs/en/hooks); unsupported versions, missing trust and unprovable daemon ownership are reported as unverified.
+
+### Pi support (automatic)
+
+Pi's identity extension is embedded in the lazy-tmux binary. Running `lazy-tmux
+setup`, `bootstrap`, `daemon`, `picker`, `save`, `sleep`, `restore`, or `wakeup`
+installs/updates it in `<pi-home>/extensions/lazy-tmux-pi.ts`. Normal tmux startup
+with bootstrap or the autosave daemon therefore prepares Pi automatically, before
+new Pi clients launch. No npm package or manual file copying is required.
+
+New Pi clients load it automatically. Pi clients already running before the first
+installation need a restart or `/reload` **when idle**; lazy-tmux never sends keys,
+reloads clients, or restarts existing agents automatically. Merely unpacking a
+binary without running lazy-tmux cannot configure a Pi process that already
+started. Disabled extensions/project trust restrictions in Pi still apply.
+
+The extension uses Pi's public `sessionManager.getSessionFile()` API and publishes
+the exact file, owner PID, and process start time on startup, resume, fork, and after turns. lazy-tmux
+checks that the owner is a foreground Pi process in the pane, validates the JSONL
+header, and stores the exact ID and path. It never chooses a history by timestamp
+or assumes that the only file in a directory belongs to a live client. Large
+JSONL records and symlinked working directories are supported.
+
+```sh
+lazy-tmux integrations setup pi             # explicit install/update
+lazy-tmux integrations doctor               # installation and live identity
+lazy-tmux integrations setup pi --uninstall # persistent automatic-setup opt-out
+```
+
+Explicit setup re-enables automatic installation after uninstall. Set
+`[integrations.pi] enabled = false` (or disable integrations globally) to disable
+Pi integration altogether. Non-owned files at the managed filename are never
+overwritten; managed upgrades preserve the previous file in `.lazy-tmux.bak`.
+
+`PI_CODING_AGENT_DIR` and `PI_CODING_AGENT_SESSION_DIR` select custom default homes
+and session directories; explicit `[integrations.pi] home` and `session_dir`
+configuration takes precedence. Update the executable used by your autosave daemon
+as well as the CLI and restart the daemon after upgrading: an already running
+daemon continues using its old code. Existing snapshots without Pi identity are
+not guessed or automatically repaired.

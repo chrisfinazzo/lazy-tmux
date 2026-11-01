@@ -635,7 +635,7 @@ func (r *argsRunner) runCommand(args ...string) commandResult {
 func TestCapturePane(t *testing.T) {
 	t.Parallel()
 
-	runner := &argsRunner{out: "antex|/workspace|123|%7|/tmp/socket||\n"}
+	runner := &argsRunner{out: "antex|/workspace|123|%7|/tmp/socket|||\n"}
 	client := NewClientWithRunner("tmux", runner)
 
 	got, err := client.CapturePane("%7")
@@ -649,6 +649,7 @@ func TestCapturePane(t *testing.T) {
 		RestoreCmd:  "",
 		Scrollback:  nil,
 		IsActive:    true,
+		ProcessPID:  123,
 		Meta:        nil,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -662,7 +663,7 @@ func TestCapturePane(t *testing.T) {
 		"-t",
 		"%7",
 		"#{pane_current_command}|#{pane_current_path}|#{pane_pid}|#{pane_id}|" +
-			"#{socket_path}|#{@lazy_tmux_agent_binding}|#{@antex_binding}",
+			"#{socket_path}|#{@lazy_tmux_agent_binding}|#{@antex_binding}|#{@lazy_tmux_pi_binding}",
 	}
 	if len(runner.calls) != 1 || !slices.Equal(runner.calls[0], wantArgs) {
 		t.Fatalf("CapturePane args = %q; want %q", runner.calls, wantArgs)
