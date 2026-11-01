@@ -1,0 +1,7 @@
+[config]
+model = "openai/qwen3.8-27b"
+fallback_models = []
+custom_model_max_tokens = 131072
+
+[pr_reviewer]
+extra_instructions = "Review Go and TypeScript changes in lazy-tmux. Prefer concrete bugs, broken tmux behavior, and missing tests over style comments."
